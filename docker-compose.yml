@@ -1,0 +1,73 @@
+version: '3.8'
+
+services:
+  # 1. PostgreSQL Database Service
+  db:
+    image: postgres:16-alpine
+    container_name: kitculture_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: kitculture_db
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgrespassword2025
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d kitculture_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - kitculture_network
+
+  # 2. Django REST Framework Backend Service
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: kitculture_backend
+    restart: unless-stopped
+    environment:
+      DEBUG: "False"
+      SECRET_KEY: "kitculture-docker-production-secret-key-2025"
+      USE_POSTGRES: "True"
+      DB_NAME: kitculture_db
+      DB_USER: postgres
+      DB_PASSWORD: postgrespassword2025
+      DB_HOST: db
+      DB_PORT: 5432
+      RAZORPAY_KEY_ID: "rzp_test_KitCultureDemoKey"
+      RAZORPAY_KEY_SECRET: "demoSecretKeyKitCulture2025"
+    ports:
+      - "8000:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - kitculture_network
+
+  # 3. React Frontend Service (Served via Nginx Reverse Proxy)
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: kitculture_frontend
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "5173:80"
+    depends_on:
+      - backend
+    networks:
+      - kitculture_network
+
+volumes:
+  postgres_data:
+    name: kitculture_postgres_data
+
+networks:
+  kitculture_network:
+    name: kitculture_network
+    driver: bridge

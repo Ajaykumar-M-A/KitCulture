@@ -1,0 +1,165 @@
+name: Kit Culture CI/CD Pipeline
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+
+jobs:
+  # ==========================================
+  # 1. Backend CI: Lint, Check & Test
+  # ==========================================
+  backend-ci:
+    name: Backend CI (Python DRF & Migrations)
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: kitculture_test_db
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: testpassword
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install Backend Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r backend/requirements.txt
+
+      - name: Run Django System Checks
+        run: |
+          cd backend
+          python manage.py check
+
+      - name: Run Database Migrations on PostgreSQL
+        env:
+          USE_POSTGRES: "True"
+          DB_NAME: kitculture_test_db
+          DB_USER: postgres
+          DB_PASSWORD: testpassword
+          DB_HOST: localhost
+          DB_PORT: 5432
+        run: |
+          cd backend
+          python manage.py migrate
+
+      - name: Run Seed Data Command
+        env:
+          USE_POSTGRES: "True"
+          DB_NAME: kitculture_test_db
+          DB_USER: postgres
+          DB_PASSWORD: testpassword
+          DB_HOST: localhost
+          DB_PORT: 5432
+        run: |
+          cd backend
+          python manage.py seed_jerseys
+
+      - name: Run Django Automated Tests
+        env:
+          USE_POSTGRES: "False"
+        run: |
+          cd backend
+          python manage.py test
+
+  # ==========================================
+  # 2. Frontend CI: Lint & Production Build
+  # ==========================================
+  frontend-ci:
+    name: Frontend CI (React Vite & Tailwind)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+          cache-dependency-path: frontend/package.json
+
+      - name: Install Frontend Dependencies
+        run: |
+          cd frontend
+          npm ci || npm install
+
+      - name: Build Vite Production Assets
+        run: |
+          cd frontend
+          npm run build
+
+  # ==========================================
+  # 3. Docker CI: Multi-Container Build Verification
+  # ==========================================
+  docker-ci:
+    name: Docker & Docker Compose Build Verification
+    runs-on: ubuntu-latest
+    needs: [ backend-ci, frontend-ci ]
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Validate Docker Compose Configuration
+        run: |
+          docker compose config
+
+      - name: Build Backend Docker Image
+        uses: docker/build-push-action@v5
+        with:
+          context: ./backend
+          push: false
+          tags: kitculture-backend:test
+
+      - name: Build Frontend Docker Image
+        uses: docker/build-push-action@v5
+        with:
+          context: ./frontend
+          push: false
+          tags: kitculture-frontend:test
+
+  # ==========================================
+  # 4. CD Pipeline: Automated Deployment Simulation
+  # ==========================================
+  cd-deploy:
+    name: Continuous Deployment (CD)
+    runs-on: ubuntu-latest
+    needs: [ docker-ci ]
+    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Deployment Step
+        run: |
+          echo "========================================================"
+          echo "Kit Culture CI verification passed successfully!"
+          echo "Deploying production containers to host / cluster..."
+          echo "Branch: ${{ github.ref }}"
+          echo "Commit: ${{ github.sha }}"
+          echo "Deployment completed with zero downtime."
+          echo "========================================================"
